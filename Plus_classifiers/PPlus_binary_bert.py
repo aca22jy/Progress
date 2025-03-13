@@ -34,7 +34,7 @@ test = True
 
 if args.test == True:
 
-    df = pd.read_csv('../sources/ProgressTrainingCombined.tsv', sep='\t',
+    df = pd.read_csv('C:/Users/13722/Desktop/UG project/FAIR/sources/ProgressTrainingCombined.tsv', sep='\t',
                      usecols=['PaperTitle', 'Abstract', 'JN', 'Place', 'Race', 'Occupation', 'Gender', 'Religion',
                               'Education', 'Socioeconomic', 'Social', 'Plus'])
     if args.journal_name == True:
@@ -53,7 +53,7 @@ if args.test == True:
     MAX_LEN = 20
 
 else:
-    df = pd.read_csv('./sources/ProgressTrainingCombined.tsv', sep='\t',
+    df = pd.read_csv('C:/Users/13722/Desktop/UG project/FAIR/sources/ProgressTrainingCombined.tsv', sep='\t',
                      usecols=['PaperTitle', 'Abstract', 'JN', 'Place', 'Race', 'Occupation', 'Gender', 'Religion',
                               'Education', 'Socioeconomic', 'Social', 'Plus'])
     if args.journal_name == True:
@@ -105,8 +105,10 @@ class CustomDataset(Dataset):
             None,
             add_special_tokens=True,
             max_length=self.max_len,
-            pad_to_max_length=True,
-            return_token_type_ids=True
+            padding='max_length',      # 替换 pad_to_max_length=True
+            truncation=True,           # 明确启用截断
+            return_token_type_ids=True,
+            return_attention_mask=True  # 确保返回 attention mask
         )
         ids = inputs['input_ids']
         mask = inputs['attention_mask']

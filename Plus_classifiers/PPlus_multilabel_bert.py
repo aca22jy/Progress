@@ -1,5 +1,5 @@
 import argparse
-import numpy as np
+import numpy as np  # 正确的语法
 import pandas as pd
 from sklearn import metrics
 from sklearn.metrics import f1_score, brier_score_loss, recall_score, precision_score, roc_auc_score
@@ -16,7 +16,7 @@ device = 'cuda' if cuda.is_available() else 'cpu'
 parser = argparse.ArgumentParser()
 parser.add_argument("--test", default = False, action='store_true')
 parser.add_argument("--epoch", "-e", default=200, type=int)
-parser.add_argument("--max_len", "-m", default=600, type=int)
+parser.add_argument("--max_len", "-m", default=512, type=int)
 parser.add_argument("--learning_rate", "-l", default=1e-05, action = 'store_true')
 parser.add_argument("--train_batch_size", "-t", default=16, type=int)
 parser.add_argument('--journal_name', '-j', action = 'store_true')
@@ -64,7 +64,7 @@ else:
     results_directory = './results/'
 
 
-print(df.mean())
+print(df.select_dtypes(include=['number']).mean())
 LABEL_NUM = 9
 if args.bert_model == 'allenai/scibert_scivocab_uncased':
     tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
@@ -92,7 +92,8 @@ class CustomDataset(Dataset):
             None,
             add_special_tokens=True,
             max_length=self.max_len,
-            pad_to_max_length=True,
+            padding='max_length',  # 替换过时的pad_to_max_length参数
+            truncation=True,  # 明确启用截断
             return_token_type_ids=True
         )
         ids = inputs['input_ids']
@@ -168,18 +169,16 @@ optimizer = torch.optim.Adam(params=model.parameters(), lr=LEARNING_RATE)
 
 def train_multilabel(epoch):
     print(epoch)
-
     model.train()
     for _, data in enumerate(training_loader, 0):
         ids = data['ids'].to(device, dtype=torch.long)
         mask = data['mask'].to(device, dtype=torch.long)
         token_type_ids = data['token_type_ids'].to(device, dtype=torch.long)
         targets = data['targets'].to(device, dtype=torch.float)
+        
+        optimizer.zero_grad()  # 只需调用一次
         outputs = model(ids, mask, token_type_ids)
-
-        optimizer.zero_grad()
         loss = loss_fn(outputs, targets)
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
     print(loss)
