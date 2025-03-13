@@ -46,7 +46,7 @@ if args.test == True:
     results_directory = '../results/'
 
 else:
-    df = pd.read_csv('./sources/ProgressTrainingCombined.tsv', sep='\t',
+    df = pd.read_csv('../sources/ProgressTrainingCombined.tsv', sep='\t',
                      usecols=['PaperTitle', 'Abstract', 'JN','Place', 'Race', 'Occupation', 'Gender', 'Religion',
                               'Education', 'Socioeconomic', 'Social', 'Plus'])
     if args.journal_name == True:
