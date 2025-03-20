@@ -26,7 +26,7 @@ parser.add_argument("--test", default = False, action='store_true')
 parser.add_argument("--epoch", "-e", default=10, type=int)
 parser.add_argument("--max_len", "-m", default=512, type=int)
 parser.add_argument("--learning_rate", "-l", type=float, default=1e-05)
-parser.add_argument("--train_batch_size", "-t", default=28, type=int)
+parser.add_argument("--train_batch_size", "-t", default=24, type=int)
 parser.add_argument('--journal_name', '-j', action = 'store_true')
 parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-base')  # 修改默认值为DeBERTa模型
 # parser.add_argument("--", "-t", default=16, type=int, action = 'store_true')
@@ -317,7 +317,7 @@ print(f"模型将保存为: {best_model_path}")
 early_stop = False  # 是否触发早停
 
 # 梯度累积设置
-accumulation_steps = 8  # 累积4个批次
+accumulation_steps = 2  # 累积4个批次
 effective_batch_size = args.train_batch_size * accumulation_steps
 print(f"使用梯度累积: {accumulation_steps}步, 有效批次大小: {effective_batch_size}")
 
