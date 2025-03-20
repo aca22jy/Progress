@@ -315,7 +315,7 @@ print("模型将保存为: {}".format(best_model_path))
 early_stop = False  # 是否触发早停
 
 # 梯度累积设置
-accumulation_steps = 4  # 累积4个批次
+accumulation_steps = 2  # 累积4个批次
 effective_batch_size = args.train_batch_size * accumulation_steps
 print("使用梯度累积: {}步, 有效批次大小: {}".format(accumulation_steps, effective_batch_size))
 
