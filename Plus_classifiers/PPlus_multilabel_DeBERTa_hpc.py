@@ -25,9 +25,9 @@ device = 'cuda' if cuda.is_available() else 'cpu'
 parser = argparse.ArgumentParser()
 parser.add_argument("--test", default = False, action='store_true')
 parser.add_argument("--epoch", "-e", default=10, type=int)
-parser.add_argument("--max_len", "-m", default=512, type=int)
+parser.add_argument("--max_len", "-m", default=768, type=int)
 parser.add_argument("--learning_rate", "-l", type=float, default=2e-6)
-parser.add_argument("--train_batch_size", "-t", default=32, type=int)
+parser.add_argument("--train_batch_size", "-t", default=48, type=int)
 parser.add_argument('--journal_name', '-j', action = 'store_true')
 parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-base')  # 修改默认值为DeBERTa模型
 # parser.add_argument("--", "-t", default=16, type=int, action = 'store_true')
@@ -165,14 +165,17 @@ training_set = CustomDataset(train_dataset, tokenizer, MAX_LEN)
 testing_set = CustomDataset(test_dataset, tokenizer, MAX_LEN)
 
 
+# 增加数据加载的并行性
 train_params = {'batch_size': TRAIN_BATCH_SIZE,
                 'shuffle': True,
-                'num_workers': 0
+                'num_workers': 4,  # 增加到4或8
+                'pin_memory': True  # 启用内存固定
                 }
 
 test_params = {'batch_size': VALID_BATCH_SIZE,
                 'shuffle': False,
-                'num_workers': 0
+                'num_workers': 4,
+                'pin_memory': True
                 }
 
 training_loader = DataLoader(training_set, **train_params)
@@ -212,6 +215,7 @@ class BERT_multilabel(torch.nn.Module):
         output_2 = self.l2(pooled_output)
         output = self.l3(output_2)
         return output
+
 
 
 
@@ -270,12 +274,24 @@ def focal_loss_with_weights_dynamic(outputs, targets, gammas,smoothing):
 # 1. 模型定义与初始化部分保持不变
 model = BERT_multilabel()
 model.to(device)
-# 差分学习率设置 - 预训练层较小学习率，分类层较大学习率
+
+# 在模型初始化后添加
+if "large" in args.bert_model:
+    # 对于大型模型启用梯度检查点以优化内存使用
+    model.gradient_checkpointing_enable()
+
+# 调整学习率设置，A100上可以使用略大的学习率
+if "large" in args.bert_model:
+    base_lr = 3e-6  # 对于large模型
+else:
+    base_lr = 5e-6  # 对于base模型
+
+# 差分学习率设置
 optimizer = AdamW([
-    {'params': model.l1.parameters(), 'lr': LEARNING_RATE/10},  # 预训练层使用较小学习率
+    {'params': model.l1.parameters(), 'lr': base_lr/5},  # 预训练层使用更小学习率
     {'params': list(model.l2.parameters()) + list(model.l3.parameters()), 
-     'lr': LEARNING_RATE}  # 分类层使用标准学习率
-], weight_decay=0.01)  # AdamW的典型权重衰减值
+     'lr': base_lr}  # 分类层使用标准学习率
+], weight_decay=0.01)
 
 # 2. 早停机制参数设置
 patience = 8  # 允许连续多少个epoch没有改进
