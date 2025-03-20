@@ -7,6 +7,8 @@ import transformers
 import torch
 from torch.utils.data import Dataset, DataLoader, RandomSampler, SequentialSampler
 from transformers import BertTokenizer, BertModel, BertConfig, AutoTokenizer
+from transformers import RobertaTokenizer, RobertaModel, RobertaConfig
+from transformers import AutoModel, AutoConfig
 from torch import cuda
 import os
 device = 'cuda' if cuda.is_available() else 'cpu'
@@ -16,14 +18,12 @@ device = 'cuda' if cuda.is_available() else 'cpu'
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--test", default = False, action='store_true')
-parser.add_argument("--epoch", "-e", default=20, type=int)
+parser.add_argument("--epoch", "-e", default=10, type=int)
 parser.add_argument("--max_len", "-m", default=512, type=int)
-parser.add_argument("--learning_rate", "-l", default=2e-05, action = 'store_true')
-parser.add_argument("--train_batch_size", "-t", default=32, type=int)
+parser.add_argument("--learning_rate", "-l", type=float, default=1e-05)
+parser.add_argument("--train_batch_size", "-t", default=28, type=int)
 parser.add_argument('--journal_name', '-j', action = 'store_true')
-parser.add_argument("--bert_model", "-b", default='bert-base-uncased')
-parser.add_argument("--model_variant", "-v", default="base", 
-                   help="Model variant identifier, such as 'base', 'arch384', etc.")
+parser.add_argument("--bert_model", "-b", default='roberta-base')  # 修改默认值
 # parser.add_argument("--", "-t", default=16, type=int, action = 'store_true')
 args = parser.parse_args()
 
@@ -69,11 +69,9 @@ else:
 
 print(df.select_dtypes(include=['number']).mean())
 LABEL_NUM = 9
-if args.bert_model == 'allenai/scibert_scivocab_uncased':
-    tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
-else:
-    tokenizer = BertTokenizer.from_pretrained(args.bert_model)
-list_of_label = ['Place', 'Race', 'Occupation', 'Gender', 'Religion', 'Education', 'Socioeconomic', 'Social', 'Plus']
+list_of_label = ['Place', 'Race', 'Occupation', 'Gender', 'Religion', 'Education', 'Socioeconomic', 'Social', 'Plus']  # 添加这一行
+tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
+
 
 # 计算每个类别的正例权重 (类别频率的倒数)
 class_frequencies = np.array([0.419483, 0.413022, 0.149105, 0.488569, 0.029324, 
@@ -94,6 +92,10 @@ for i, freq in enumerate(class_frequencies):
 problem_categories = [2, 4, 7]  # Occupation, Religion, Social
 for i in problem_categories:
     weights[i] = weights[i] * 1.5  # 进一步提高权重
+
+
+# 特别提高Social类别的权重上限
+weights[7] = 45.0  # Social类别的索引是7
 
 # 转换为PyTorch张量并移至正确设备
 pos_weights = torch.tensor(weights, dtype=torch.float).to(device)
@@ -120,11 +122,15 @@ class CustomDataset(Dataset):
             max_length=self.max_len,
             padding='max_length',  # 替换过时的pad_to_max_length参数
             truncation=True,  # 明确启用截断
-            return_token_type_ids=True
+            return_token_type_ids='roberta' not in args.bert_model  # RoBERTa不需要token_type_ids
         )
         ids = inputs['input_ids']
         mask = inputs['attention_mask']
-        token_type_ids = inputs["token_type_ids"]
+        if 'roberta' in args.bert_model:
+          token_type_ids = [0] * len(ids)  # RoBERTa不使用，但保持接口一致
+        else:
+          token_type_ids = inputs["token_type_ids"]
+
 
         return {
             'ids': torch.tensor(ids, dtype=torch.long),
@@ -168,37 +174,29 @@ testing_loader = DataLoader(testing_set, **test_params)
 class BERT_multilabel(torch.nn.Module):
     def __init__(self):
         super(BERT_multilabel, self).__init__()
-        self.l1 = transformers.BertModel.from_pretrained(args.bert_model)
+        self.l1 = AutoModel.from_pretrained(args.bert_model)
         self.l2 = torch.nn.Dropout(0.3)
-        
-        # 替换单一l3层的方案
-        self.intermediate = torch.nn.Sequential(
-            torch.nn.Linear(768, 1024),  # 先扩大而非缩小
-            torch.nn.LayerNorm(1024),
-            torch.nn.GELU(),
-            torch.nn.Dropout(0.2),
-            torch.nn.Linear(1024, 512),  # 然后再降维
-            torch.nn.LayerNorm(512),
-            torch.nn.GELU(),
-            torch.nn.Dropout(0.1)
-        )
-        
-        # 为每个类别创建专用分类器
-        self.classifiers = torch.nn.ModuleList([
-            torch.nn.Linear(512, 1) for _ in range(LABEL_NUM)
-        ])
+                # 动态设置隐藏层维度，适应不同模型大小
+        hidden_size = 1024 if "large" in args.bert_model else 768
+        self.l3 = torch.nn.Linear(hidden_size, LABEL_NUM)
 
     def forward(self, ids, mask, token_type_ids):
-        output_1 = self.l1(ids, attention_mask=mask, token_type_ids=token_type_ids)
-        pooled_output = output_1[1]
-        dropout_output = self.l2(pooled_output)
+        # RoBERTa不使用token_type_ids
+        if 'roberta' in args.bert_model:
+            output_1 = self.l1(ids, attention_mask=mask)
+        else:
+            output_1 = self.l1(ids, attention_mask=mask, token_type_ids=token_type_ids)
         
-        # 增强特征表示
-        intermediate = self.intermediate(dropout_output)
-        
-        # 每个类别单独分类
-        outputs = [cls(intermediate) for cls in self.classifiers]
-        return torch.cat(outputs, dim=1)
+        # 获取[CLS]对应的向量
+        if hasattr(output_1, "pooler_output"):
+            pooled_output = output_1.pooler_output
+        elif type(output_1) is tuple:
+            pooled_output = output_1[1]
+        else:
+            pooled_output = output_1.last_hidden_state[:, 0]
+        output_2 = self.l2(pooled_output)
+        output = self.l3(output_2)
+        return output
 
 
 
@@ -208,7 +206,7 @@ def loss_fn(outputs, targets):
     # 为不同类别设置不同gamma值
     gammas = [2.0] * LABEL_NUM
     gammas[4] = 3.0  # Religion使用更高gamma
-    gammas[7] = 2.5  # Social使用略高gamma
+    gammas[7] = 3.5  # Social使用略高gamma
     return focal_loss_with_weights_dynamic(outputs, targets, gammas)
 
 def focal_loss_with_weights_dynamic(outputs, targets, gammas):
@@ -246,47 +244,76 @@ def focal_loss_with_weights_dynamic(outputs, targets, gammas):
 # 1. 模型定义与初始化部分保持不变
 model = BERT_multilabel()
 model.to(device)
-
-
-# 层级学习率
-from torch.optim import AdamW
-# 建议的完整训练学习率设置
-optimizer = AdamW([
-    {'params': model.l1.parameters(), 'lr': 8e-6},  # BERT层
-    {'params': model.intermediate.parameters(), 'lr': 5e-5},  # 中间层
-    {'params': model.classifiers.parameters(), 'lr': 1e-4}  # 分类器层
-])
-
-# 学习率调度器
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=4, threshold=0.01)
-
-
-
+optimizer = torch.optim.Adam(params=model.parameters(), lr=LEARNING_RATE)
 
 # 2. 早停机制参数设置
-patience = 5  # 允许连续多少个epoch没有改进
+patience = 8  # 允许连续多少个epoch没有改进
 best_f1 = 0   # 跟踪最佳F1分数
 counter = 0   # 计数器：连续没有改进的epoch数
-best_model_path = f"{results_directory}/best_model.pt"  # 最佳模型保存路径
+
+
+# 创建包含详细参数信息的模型文件名
+def create_model_name():
+    # 基本模型类型
+    model_type = "roberta" if "roberta" in args.bert_model else "scibert"
+    
+    # 模型具体变种
+    if "base" in args.bert_model:
+        variant = "base"
+    elif "large" in args.bert_model:
+        variant = "large"
+    else:
+        variant = "custom"
+    
+    # 核心参数字符串
+    params_str = f"bs{args.train_batch_size}_lr{args.learning_rate:.1e}_ep{args.epoch}"
+    
+    # 生成最终文件名
+    return f"{results_directory}/{model_type}_{variant}_{params_str}.pt"
+    
+
+    
+
+# 在训练开始前定义模型保存路径
+best_model_path = create_model_name()
+print(f"模型将保存为: {best_model_path}")
 early_stop = False  # 是否触发早停
+
+# 梯度累积设置
+accumulation_steps = 2  # 累积4个批次
+effective_batch_size = args.train_batch_size * accumulation_steps
+print(f"使用梯度累积: {accumulation_steps}步, 有效批次大小: {effective_batch_size}")
 
 # 3. 先定义训练与验证函数
 def train_multilabel(epoch):
     print(epoch)
     model.train()
-    for _, data in enumerate(training_loader, 0):
+    optimizer.zero_grad()  # 在整个循环外部清零梯度
+    accumulated_loss = 0
+    
+    for i, data in enumerate(training_loader, 0):
         ids = data['ids'].to(device, dtype=torch.long)
         mask = data['mask'].to(device, dtype=torch.long)
         token_type_ids = data['token_type_ids'].to(device, dtype=torch.long)
         targets = data['targets'].to(device, dtype=torch.float)
         
-        optimizer.zero_grad()
         outputs = model(ids, mask, token_type_ids)
-        loss = loss_fn(outputs, targets)
+        # 缩放损失值，使总梯度大小与常规训练相当
+        loss = loss_fn(outputs, targets) / accumulation_steps
+        accumulated_loss += loss.item() * accumulation_steps  # 累积原始损失
         loss.backward()
+        
+        # 每处理accumulation_steps个批次才更新一次权重
+        if (i + 1) % accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+    
+    # 处理最后不足accumulation_steps的批次
+    if (i + 1) % accumulation_steps != 0:
         optimizer.step()
-    print(loss)
+        optimizer.zero_grad()
+        
+    print(f"Average loss: {accumulated_loss / (i+1):.4f}")
 
 # 4. 定义验证函数 - 这个必须在训练循环前定义
 def validation_multilabel(model):
@@ -309,7 +336,6 @@ def validation_multilabel(model):
 
     return fin_outputs, fin_targets, text_list
 
-
 # 5. 然后才是训练循环
 for epoch in range(EPOCHS):
     train_multilabel(epoch)
@@ -327,20 +353,7 @@ for epoch in range(EPOCHS):
         print(f"F1 improved from {best_f1:.4f} to {current_f1:.4f}! Saving model...")
         best_f1 = current_f1
         # 保存最佳模型
-        # torch.save(model.state_dict(), best_model_path)
-        
-                # 根据参数组合决定保存路径
-        if args.model_variant == "base" and args.train_batch_size == 32:
-                    # 基础模型 - SciBERT + 默认架构 + 批次大小32
-                    torch.save(model.state_dict(), best_model_path)
-                    print(f"保存为默认基础模型: {best_model_path}")
-                    
-        elif args.model_variant == "batch16" or args.train_batch_size != 32:
-                    # 批次大小变体
-                    model2_path = f"{results_directory}/model2_batch{args.train_batch_size}.pt"
-                    torch.save(model.state_dict(), model2_path)
-                    print(f"保存为批次大小变体模型: {model2_path}")
-                    
+        torch.save(model.state_dict(), best_model_path)
         counter = 0  # 重置计数器
     else:
         counter += 1
@@ -352,63 +365,26 @@ for epoch in range(EPOCHS):
             early_stop = True
             break
 
-    # 在每个epoch后更新学习率
-    scheduler.step(current_f1)
-
-    # 在scheduler.step()后添加
-    current_lr_bert = optimizer.param_groups[0]['lr']  # SciBERT层学习率
-    current_lr_classifier = optimizer.param_groups[1]['lr']  # 分类层学习率
-    print(f"Current learning rates - BERT: {current_lr_bert}, Classifier: {current_lr_classifier}")
-
 # 6. 训练结束后加载最佳模型
-# 根据模型变体选择正确的路径
-if args.model_variant == "base" and args.train_batch_size == 32:
-    final_model_path = best_model_path
-elif args.model_variant == "batch16" or args.train_batch_size != 32:
-    final_model_path = f"{results_directory}/model2_batch{args.train_batch_size}.pt"
-elif args.model_variant == "arch384":
-    final_model_path = f"{results_directory}/model3_arch384.pt"
-else:
-    final_model_path = f"{results_directory}/model_{args.model_variant}.pt"
-
-# 加载正确的模型
-if os.path.exists(final_model_path):
-    print(f"Loading best model from {final_model_path}")
-    model.load_state_dict(torch.load(final_model_path))
+if os.path.exists(best_model_path):
+    print(f"Loading best model from {best_model_path}")
+    model.load_state_dict(torch.load(best_model_path))
 
 
 multilabel_prod, targets, text_list = validation_multilabel(model)
 multilabel_prod_array = np.array(multilabel_prod)
-
-# 更有针对性的阈值，特别是对稀有类别
-thresholds = {
-    'Place': 0.55,      # 提高精度
-    'Race': 0.52,       # 稍微提高精度
-    'Occupation': 0.40, # 增加召回率
-    'Gender': 0.58,     # 已经很好，增加精度
-    'Religion': 0.18,   # 极度稀有，大幅降低阈值
-    'Education': 0.48,  # 微调
-    'Socioeconomic': 0.52, # 增加精度
-    'Social': 0.22,     # 极度稀有，大幅降低阈值
-    'Plus': 0.52        # 增加精度
-}
-
-# 将dict转为list以适应现有代码
-thresholds_list = [thresholds[label] for label in list_of_label]
-# 正确: 使用列表 thresholds_list[i]
-multilabel_pred = [[1 if float(nested[i]) >= thresholds_list[i] else 0 
-                   for i in range(len(nested))] 
-                  for nested in multilabel_prod]
+# multilabel_prod_array = np.array([np.array(xi) for xi in multilabel_prod])
+multilabel_pred = [[np.round(float(i)) for i in nested] for nested in multilabel_prod]
 multilabel_pred_array = np.array(multilabel_pred)
 
 testing_results = pd.DataFrame(list(zip(text_list, targets, multilabel_pred, multilabel_prod)),
                                columns =['Text', 'Ground truth', 'Prediction', 'Probability'])
 
 
-if args.bert_model == 'allenai/scibert_scivocab_uncased':
+if 'scibert' in args.bert_model:
     results_df_name = 'scibert_' + str(args.max_len) + 'len_' + str(args.train_batch_size) + 'b_' + str(args.epoch) + 'e_'+ 'multilabel_results.csv'
-elif args.bert_model == 'bert_base_uncased':
-    results_df_name = str(args.max_len) + 'len_' + str(args.train_batch_size) + 'b_' + str(args.epoch) + 'e_'+ 'multilabel_results.csv'
+elif 'roberta' in args.bert_model:
+    results_df_name = 'roberta_' + str(args.max_len) + 'len_' + str(args.train_batch_size) + 'b_' + str(args.epoch) + 'e_'+ 'multilabel_results.csv'
 else:
     results_df_name = str(args.max_len) + 'len_' + str(args.train_batch_size) + 'b_' + str(args.epoch) + 'e_'+ 'multilabel_results.csv'
 

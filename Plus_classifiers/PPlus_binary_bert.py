@@ -34,7 +34,7 @@ test = True
 
 if args.test == True:
 
-    df = pd.read_csv('C:/Users/13722/Desktop/UG project/FAIR/sources/ProgressTrainingCombined.tsv', sep='\t',
+    df = pd.read_csv('../sources/ProgressTrainingCombined.tsv', sep='\t',
                      usecols=['PaperTitle', 'Abstract', 'JN', 'Place', 'Race', 'Occupation', 'Gender', 'Religion',
                               'Education', 'Socioeconomic', 'Social', 'Plus'])
     if args.journal_name == True:
@@ -53,7 +53,7 @@ if args.test == True:
     MAX_LEN = 20
 
 else:
-    df = pd.read_csv('C:/Users/13722/Desktop/UG project/FAIR/sources/ProgressTrainingCombined.tsv', sep='\t',
+    df = pd.read_csv('./sources/ProgressTrainingCombined.tsv', sep='\t',
                      usecols=['PaperTitle', 'Abstract', 'JN', 'Place', 'Race', 'Occupation', 'Gender', 'Religion',
                               'Education', 'Socioeconomic', 'Social', 'Plus'])
     if args.journal_name == True:
