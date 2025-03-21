@@ -27,7 +27,7 @@ parser.add_argument("--test", default = False, action='store_true')
 parser.add_argument("--epoch", "-e", default=10, type=int)
 parser.add_argument("--max_len", "-m", default=768, type=int)
 parser.add_argument("--learning_rate", "-l", type=float, default=2e-6)
-parser.add_argument("--train_batch_size", "-t", default=48, type=int)
+parser.add_argument("--train_batch_size", "-t", default=30, type=int)
 parser.add_argument('--journal_name', '-j', action = 'store_true')
 parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-base')  # 修改默认值为DeBERTa模型
 # parser.add_argument("--", "-t", default=16, type=int, action = 'store_true')
@@ -282,15 +282,15 @@ if "large" in args.bert_model:
 
 # 调整学习率设置，A100上可以使用略大的学习率
 if "large" in args.bert_model:
-    base_lr = 3e-6  # 对于large模型
+    base_lr = 5e-6  # 对于large模型
 else:
-    base_lr = 5e-6  # 对于base模型
+    base_lr = 8e-6  # 对于base模型
 
-# 差分学习率设置
+# 减小差异倍数
 optimizer = AdamW([
-    {'params': model.l1.parameters(), 'lr': base_lr/5},  # 预训练层使用更小学习率
+    {'params': model.l1.parameters(), 'lr': base_lr/3},  # 从1/5改为1/3
     {'params': list(model.l2.parameters()) + list(model.l3.parameters()), 
-     'lr': base_lr}  # 分类层使用标准学习率
+     'lr': base_lr}
 ], weight_decay=0.01)
 
 # 2. 早停机制参数设置
@@ -337,7 +337,7 @@ print("使用梯度累积: {}步, 有效批次大小: {}".format(accumulation_st
 
 # 添加以下代码到您的训练循环前
 num_training_steps = len(training_loader) * EPOCHS
-num_warmup_steps = int(0.1 * num_training_steps)  # 10%预热期
+num_warmup_steps = int(0.15 * num_training_steps)  # 10%预热期
 
 scheduler = get_linear_schedule_with_warmup(
     optimizer, 
