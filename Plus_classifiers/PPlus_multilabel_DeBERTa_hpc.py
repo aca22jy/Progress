@@ -168,13 +168,13 @@ testing_set = CustomDataset(test_dataset, tokenizer, MAX_LEN)
 # 增加数据加载的并行性
 train_params = {'batch_size': TRAIN_BATCH_SIZE,
                 'shuffle': True,
-                'num_workers': 4,  # 增加到4或8
+                'num_workers': 1,  # 增加到4或8
                 'pin_memory': True  # 启用内存固定
                 }
 
 test_params = {'batch_size': VALID_BATCH_SIZE,
                 'shuffle': False,
-                'num_workers': 4,
+                'num_workers': 1,
                 'pin_memory': True
                 }
 
