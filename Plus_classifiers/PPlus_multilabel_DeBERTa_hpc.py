@@ -278,7 +278,7 @@ model.to(device)
 # 在模型初始化后添加
 if "large" in args.bert_model:
     # 对于大型模型启用梯度检查点以优化内存使用
-    model.gradient_checkpointing_enable()
+    model.l1.gradient_checkpointing_enable()
 
 # 调整学习率设置，A100上可以使用略大的学习率
 if "large" in args.bert_model:
