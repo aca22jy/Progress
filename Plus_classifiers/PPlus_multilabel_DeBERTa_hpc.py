@@ -13,7 +13,7 @@ from transformers import RobertaTokenizer, RobertaModel, RobertaConfig
 from transformers import DebertaTokenizer, DebertaModel, DebertaConfig
 from transformers import DebertaV2Tokenizer, DebertaV2Model, DebertaV2Config
 from transformers import AutoModel, AutoConfig
-from torch.optim import AdamW
+# from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 from torch import cuda
 import os
@@ -337,13 +337,20 @@ print("使用梯度累积: {}步, 有效批次大小: {}".format(accumulation_st
 
 # 添加以下代码到您的训练循环前
 num_training_steps = len(training_loader) * EPOCHS
-num_warmup_steps = int(0.15 * num_training_steps)  # 10%预热期
+num_warmup_steps = int(0.1 * num_training_steps)  
 
-scheduler = get_linear_schedule_with_warmup(
-    optimizer, 
-    num_warmup_steps=num_warmup_steps, 
-    num_training_steps=num_training_steps
-)
+# scheduler = get_linear_schedule_with_warmup(
+#     optimizer, 
+#     num_warmup_steps=num_warmup_steps, 
+#     num_training_steps=num_training_steps
+# )
+
+# 使用原始的Adam优化器，保留差分学习率设置
+optimizer = torch.optim.Adam([
+    {'params': model.l1.parameters(), 'lr': base_lr/3},
+    {'params': list(model.l2.parameters()) + list(model.l3.parameters()), 
+     'lr': base_lr}
+])
 
 
 # 3. 先定义训练与验证函数
