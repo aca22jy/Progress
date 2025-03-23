@@ -13,24 +13,20 @@ from transformers import RobertaTokenizer, RobertaModel, RobertaConfig
 from transformers import DebertaTokenizer, DebertaModel, DebertaConfig
 from transformers import DebertaV2Tokenizer, DebertaV2Model, DebertaV2Config
 from transformers import AutoModel, AutoConfig
-# from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 from torch import cuda
 import os
 device = 'cuda' if cuda.is_available() else 'cpu'
 
-
-
-
+# 参数设置，使用RoBERTa成功的配置
 parser = argparse.ArgumentParser()
-parser.add_argument("--test", default = False, action='store_true')
-parser.add_argument("--epoch", "-e", default=10, type=int)
-parser.add_argument("--max_len", "-m", default=768, type=int)
-parser.add_argument("--learning_rate", "-l", type=float, default=2e-6)
-parser.add_argument("--train_batch_size", "-t", default=30, type=int)
-parser.add_argument('--journal_name', '-j', action = 'store_true')
-parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-base')  # 修改默认值为DeBERTa模型
-# parser.add_argument("--", "-t", default=16, type=int, action = 'store_true')
+parser.add_argument("--test", default=False, action='store_true')
+parser.add_argument("--epoch", "-e", default=30, type=int)  # 增加到30，与RoBERTa-large一致
+parser.add_argument("--max_len", "-m", default=512, type=int)  # 使用标准长度512
+parser.add_argument("--learning_rate", "-l", type=float, default=5e-6)  # 采用RoBERTa-large的学习率
+parser.add_argument("--train_batch_size", "-t", default=28, type=int)  # 使用RoBERTa-large的批次大小
+parser.add_argument('--journal_name', '-j', action='store_true')
+parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-large')  # 默认使用DeBERTa-v3-large
 args = parser.parse_args()
 
 EPOCHS = args.epoch
@@ -168,13 +164,13 @@ testing_set = CustomDataset(test_dataset, tokenizer, MAX_LEN)
 # 增加数据加载的并行性
 train_params = {'batch_size': TRAIN_BATCH_SIZE,
                 'shuffle': True,
-                'num_workers': 1,  # 增加到4或8
+                'num_workers': 0,  # 增加到4或8
                 'pin_memory': True  # 启用内存固定
                 }
 
 test_params = {'batch_size': VALID_BATCH_SIZE,
                 'shuffle': False,
-                'num_workers': 1,
+                'num_workers': 0,
                 'pin_memory': True
                 }
 
@@ -229,7 +225,7 @@ def loss_fn(outputs, targets):
     gammas[7] = 3.5  # Social使用略高gamma
     
     # 添加标签平滑参数，可以针对不同数据集调整
-    smoothing = 0.1  # 平滑系数，通常在0.05-0.2之间
+    smoothing = 0.0  # 平滑系数，通常在0.05-0.2之间
     
     return focal_loss_with_weights_dynamic(outputs, targets, gammas, smoothing)
 
@@ -274,24 +270,27 @@ def focal_loss_with_weights_dynamic(outputs, targets, gammas,smoothing):
 # 1. 模型定义与初始化部分保持不变
 model = BERT_multilabel()
 model.to(device)
-
-# 在模型初始化后添加
-if "large" in args.bert_model:
-    # 对于大型模型启用梯度检查点以优化内存使用
-    model.l1.gradient_checkpointing_enable()
-
-# 调整学习率设置，A100上可以使用略大的学习率
-if "large" in args.bert_model:
-    base_lr = 5e-6  # 对于large模型
+# 针对DeBERTa的学习率调整
+if "deberta" in args.bert_model.lower():
+    base_lr = 2e-6  # 降低DeBERTa的学习率
 else:
-    base_lr = 8e-6  # 对于base模型
+    base_lr = 5e-6  # 保持RoBERTa的学习率不变
 
-# 减小差异倍数
-optimizer = AdamW([
-    {'params': model.l1.parameters(), 'lr': base_lr/3},  # 从1/5改为1/3
+# 调整差分学习率比例
+optimizer = torch.optim.Adam([
+    {'params': model.l1.parameters(), 'lr': base_lr/2},  # 从1/3改为1/2
     {'params': list(model.l2.parameters()) + list(model.l3.parameters()), 
      'lr': base_lr}
-], weight_decay=0.01)
+])
+
+# # 减小差异倍数
+# optimizer = AdamW([
+#     {'params': model.l1.parameters(), 'lr': base_lr/3},  # 从1/5改为1/3
+#     {'params': list(model.l2.parameters()) + list(model.l3.parameters()), 
+#      'lr': base_lr}
+# ], weight_decay=0.01)
+
+
 
 # 2. 早停机制参数设置
 patience = 8  # 允许连续多少个epoch没有改进
@@ -331,7 +330,7 @@ print("模型将保存为: {}".format(best_model_path))
 early_stop = False  # 是否触发早停
 
 # 梯度累积设置
-accumulation_steps = 1  
+accumulation_steps = 4  # 采用RoBERTa-large的设置
 effective_batch_size = args.train_batch_size * accumulation_steps
 print("使用梯度累积: {}步, 有效批次大小: {}".format(accumulation_steps, effective_batch_size))
 
@@ -339,18 +338,13 @@ print("使用梯度累积: {}步, 有效批次大小: {}".format(accumulation_st
 num_training_steps = len(training_loader) * EPOCHS
 num_warmup_steps = int(0.1 * num_training_steps)  
 
-# scheduler = get_linear_schedule_with_warmup(
-#     optimizer, 
-#     num_warmup_steps=num_warmup_steps, 
-#     num_training_steps=num_training_steps
-# )
+scheduler = get_linear_schedule_with_warmup(
+    optimizer, 
+    num_warmup_steps=num_warmup_steps, 
+    num_training_steps=num_training_steps
+)
 
-# 使用原始的Adam优化器，保留差分学习率设置
-optimizer = torch.optim.Adam([
-    {'params': model.l1.parameters(), 'lr': base_lr/3},
-    {'params': list(model.l2.parameters()) + list(model.l3.parameters()), 
-     'lr': base_lr}
-])
+
 
 
 # 3. 先定义训练与验证函数
@@ -375,13 +369,11 @@ def train_multilabel(epoch):
         # 每处理accumulation_steps个批次才更新一次权重
         if (i + 1) % accumulation_steps == 0:
             optimizer.step()
-            scheduler.step()  # 更新学习率
             optimizer.zero_grad()
     
     # 处理最后不足accumulation_steps的批次
     if (i + 1) % accumulation_steps != 0:
         optimizer.step()
-        scheduler.step()  # 更新学习率
         optimizer.zero_grad()
         
     print("Average loss: {:.4f}".format(accumulated_loss / (i+1)))
