@@ -12,15 +12,17 @@ from transformers import DebertaV2Tokenizer, DebertaV2Model, DebertaV2Config
 from transformers import AutoModel, AutoConfig,AutoTokenizer
 from torch import cuda
 import os
+from torch.cuda.amp import autocast, GradScaler
+
 device = 'cuda' if cuda.is_available() else 'cpu'
 
 # 参数设置，使用DeBERTa成功的配置
 parser = argparse.ArgumentParser()
 parser.add_argument("--test", default=False, action='store_true')
 parser.add_argument("--epoch", "-e", default=30, type=int)
-parser.add_argument("--max_len", "-m", default=512, type=int)
-parser.add_argument("--learning_rate", "-l", type=float, default=2e-6)
-parser.add_argument("--train_batch_size", "-t", default=6, type=int)
+parser.add_argument("--max_len", "-m", default=1024, type=int)
+parser.add_argument("--learning_rate", "-l", type=float, default=5e-6)
+parser.add_argument("--train_batch_size", "-t", default=16, type=int)
 parser.add_argument('--journal_name', '-j', action='store_true')
 parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-large')
 args = parser.parse_args()
@@ -49,7 +51,7 @@ else:
     df['list'] = df[df.columns[3:12]].values.tolist()
     new_df = df[['text', 'list']].copy()
     results_directory = '../results/'
-    VALID_BATCH_SIZE = 16
+    VALID_BATCH_SIZE = 64
     TRAIN_BATCH_SIZE = args.train_batch_size
 
 print(df.select_dtypes(include=['number']).mean())
@@ -196,9 +198,11 @@ best_model_path = create_model_name()
 print(f"模型将保存为: {best_model_path}")
 early_stop = False
 
-accumulation_steps = 1
+accumulation_steps = 2
 effective_batch_size = args.train_batch_size * accumulation_steps
 print(f"使用梯度累积: {accumulation_steps}步, 有效批次大小: {effective_batch_size}")
+
+scaler = GradScaler()
 
 def train_multilabel(epoch):
     print(epoch)
@@ -212,17 +216,21 @@ def train_multilabel(epoch):
         token_type_ids = data['token_type_ids'].to(device, dtype=torch.long)
         targets = data['targets'].to(device, dtype=torch.float)
         
-        outputs = model(ids, mask, token_type_ids)
-        loss = loss_fn(outputs, targets) / accumulation_steps
+        with autocast():
+            outputs = model(ids, mask, token_type_ids)
+            loss = loss_fn(outputs, targets) / accumulation_steps
+
         accumulated_loss += loss.item() * accumulation_steps
-        loss.backward()
+        scaler.scale(loss).backward()
         
         if (i + 1) % accumulation_steps == 0:
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             optimizer.zero_grad()
     
     if (i + 1) % accumulation_steps != 0:
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         optimizer.zero_grad()
         
     print(f"Average loss: {accumulated_loss / (i+1):.4f}")
