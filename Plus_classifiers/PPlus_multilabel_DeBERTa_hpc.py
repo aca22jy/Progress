@@ -202,7 +202,7 @@ accumulation_steps = 2
 effective_batch_size = args.train_batch_size * accumulation_steps
 print(f"使用梯度累积: {accumulation_steps}步, 有效批次大小: {effective_batch_size}")
 
-scaler = GradScaler(device_type='cuda')
+scaler = GradScaler()
 
 def train_multilabel(epoch):
     print(epoch)
