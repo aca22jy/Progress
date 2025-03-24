@@ -12,7 +12,7 @@ from transformers import DebertaV2Tokenizer, DebertaV2Model, DebertaV2Config
 from transformers import AutoModel, AutoConfig,AutoTokenizer
 from torch import cuda
 import os
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 device = 'cuda' if cuda.is_available() else 'cpu'
 
@@ -20,7 +20,7 @@ device = 'cuda' if cuda.is_available() else 'cpu'
 parser = argparse.ArgumentParser()
 parser.add_argument("--test", default=False, action='store_true')
 parser.add_argument("--epoch", "-e", default=30, type=int)
-parser.add_argument("--max_len", "-m", default=1024, type=int)
+parser.add_argument("--max_len", "-m", default=512, type=int)
 parser.add_argument("--learning_rate", "-l", type=float, default=5e-6)
 parser.add_argument("--train_batch_size", "-t", default=16, type=int)
 parser.add_argument('--journal_name', '-j', action='store_true')
@@ -202,7 +202,7 @@ accumulation_steps = 2
 effective_batch_size = args.train_batch_size * accumulation_steps
 print(f"使用梯度累积: {accumulation_steps}步, 有效批次大小: {effective_batch_size}")
 
-scaler = GradScaler()
+scaler = GradScaler(device_type='cuda')
 
 def train_multilabel(epoch):
     print(epoch)
@@ -216,7 +216,7 @@ def train_multilabel(epoch):
         token_type_ids = data['token_type_ids'].to(device, dtype=torch.long)
         targets = data['targets'].to(device, dtype=torch.float)
         
-        with autocast():
+        with autocast(device_type='cuda'):
             outputs = model(ids, mask, token_type_ids)
             loss = loss_fn(outputs, targets) / accumulation_steps
 
