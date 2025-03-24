@@ -13,6 +13,7 @@ from transformers import AutoModel, AutoConfig,AutoTokenizer
 from torch import cuda
 import os
 from torch.amp import autocast, GradScaler
+from transformers import get_linear_schedule_with_warmup
 
 device = 'cuda' if cuda.is_available() else 'cpu'
 
@@ -22,7 +23,7 @@ parser.add_argument("--test", default=False, action='store_true')
 parser.add_argument("--epoch", "-e", default=30, type=int)
 parser.add_argument("--max_len", "-m", default=512, type=int)
 parser.add_argument("--learning_rate", "-l", type=float, default=5e-6)
-parser.add_argument("--train_batch_size", "-t", default=8, type=int)
+parser.add_argument("--train_batch_size", "-t", default=5, type=int)
 parser.add_argument('--journal_name', '-j', action='store_true')
 parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-large')
 args = parser.parse_args()
@@ -184,6 +185,14 @@ optimizer = torch.optim.Adam([
     {'params': list(model.dense1.parameters()) + list(model.layernorm.parameters()) + list(model.l3.parameters()), 'lr': LEARNING_RATE}
 ])
 
+total_steps = len(training_loader) * EPOCHS
+num_warmup_steps = 0.1 * total_steps  # 10%预热步数
+scheduler = get_linear_schedule_with_warmup(
+    optimizer, 
+    num_warmup_steps=num_warmup_steps,
+    num_training_steps=total_steps
+)
+
 patience = 8
 best_f1 = 0
 counter = 0
@@ -198,7 +207,7 @@ best_model_path = create_model_name()
 print(f"模型将保存为: {best_model_path}")
 early_stop = False
 
-accumulation_steps = 1
+accumulation_steps = 2
 effective_batch_size = args.train_batch_size * accumulation_steps
 print(f"使用梯度累积: {accumulation_steps}步, 有效批次大小: {effective_batch_size}")
 
@@ -227,11 +236,13 @@ def train_multilabel(epoch):
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+            scheduler.step()
     
     if (i + 1) % accumulation_steps != 0:
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()
+        scheduler.step()
         
     print(f"Average loss: {accumulated_loss / (i+1):.4f}")
 
