@@ -38,7 +38,13 @@ if args.test == True:
     df = pd.read_csv('../sources/ProgressTrainingCombined.tsv', sep='\t',
                      usecols=['PaperTitle', 'Abstract', 'Place', 'Race', 'Occupation', 'Gender', 'Religion',
                               'Education', 'Socioeconomic', 'Social', 'Plus'])
-    df['text'] = df.PaperTitle + ' ' + df.Abstract
+    
+    if args.journal_name == True:
+        df['text'] = df.PaperTitle + ' ' + df.JN + ' ' + df.Abstract
+
+
+    else:
+     df['text'] = df.PaperTitle + ' ' + df.Abstract
     df['list'] = df[df.columns[2:11]].values.tolist()
     new_df = df[['text', 'list']].copy()
     new_df = new_df.sample(300)
@@ -52,12 +58,12 @@ else:
     df = pd.read_csv('../sources/ProgressTrainingCombined.tsv', sep='\t',
                      usecols=['PaperTitle', 'Abstract', 'JN','Place', 'Race', 'Occupation', 'Gender', 'Religion',
                               'Education', 'Socioeconomic', 'Social', 'Plus'])
-    # if args.journal_name == True:
-    #     df['text'] = df.PaperTitle + ' ' + df.JN + ' ' + df.Abstract
+    if args.journal_name == True:
+        df['text'] = df.PaperTitle + ' ' + df.JN + ' ' + df.Abstract
 
 
-    # else:
-    df['text'] = df.PaperTitle + ' ' + df.Abstract
+    else:
+     df['text'] = df.PaperTitle + ' ' + df.Abstract
 
     df['list'] = df[df.columns[3:12]].values.tolist()
     new_df = df[['text', 'list']].copy()

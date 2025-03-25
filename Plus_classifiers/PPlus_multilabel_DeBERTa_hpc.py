@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--test", default=False, action='store_true')
 parser.add_argument("--epoch", "-e", default=30, type=int)
 parser.add_argument("--max_len", "-m", default=512, type=int)
-parser.add_argument("--learning_rate", "-l", type=float, default=2e-6)
+parser.add_argument("--learning_rate", "-l", type=float, default=5e-6)
 parser.add_argument("--train_batch_size", "-t", default=7, type=int)
 parser.add_argument('--journal_name', '-j', action='store_true')
 parser.add_argument("--bert_model", "-b", default='microsoft/deberta-v3-large')
@@ -186,7 +186,7 @@ optimizer = torch.optim.Adam([
 ])
 
 total_steps = len(training_loader) * EPOCHS
-num_warmup_steps = 0.1 * total_steps  # 10%预热步数
+num_warmup_steps = 0.15 * total_steps  # 10%预热步数
 scheduler = get_linear_schedule_with_warmup(
     optimizer, 
     num_warmup_steps=num_warmup_steps,
@@ -235,14 +235,16 @@ def train_multilabel(epoch):
         if (i + 1) % accumulation_steps == 0:
             scaler.step(optimizer)
             scaler.update()
+            # 先优化器，再调度器
+            scheduler.step()  # 移动到这里
             optimizer.zero_grad()
-            scheduler.step()
     
     if (i + 1) % accumulation_steps != 0:
         scaler.step(optimizer)
         scaler.update()
+        # 先优化器，再调度器
+        scheduler.step()  # 移动到这里
         optimizer.zero_grad()
-        scheduler.step()
         
     print(f"Average loss: {accumulated_loss / (i+1):.4f}")
 
