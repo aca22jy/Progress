@@ -253,7 +253,7 @@ model.to(device)
 optimizer = torch.optim.Adam(params=model.parameters(), lr=LEARNING_RATE)
 
 # 2. 早停机制参数设置
-patience = 8  # 允许连续多少个epoch没有改进
+patience = 15  # 允许连续多少个epoch没有改进
 best_f1 = 0   # 跟踪最佳F1分数
 counter = 0   # 计数器：连续没有改进的epoch数
 
