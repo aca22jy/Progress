@@ -1,5 +1,5 @@
 import argparse
-import numpy as np  # 正确的语法
+import numpy as np  
 import pandas as pd
 from sklearn import metrics
 from sklearn.metrics import f1_score, brier_score_loss, recall_score, precision_score, roc_auc_score
@@ -23,7 +23,7 @@ parser.add_argument("--max_len", "-m", default=512, type=int)
 parser.add_argument("--learning_rate", "-l", type=float, default=1e-05)
 parser.add_argument("--train_batch_size", "-t", default=28, type=int)
 parser.add_argument('--journal_name', '-j', action = 'store_true')
-parser.add_argument("--bert_model", "-b", default='roberta-base')  # 修改默认值
+parser.add_argument("--bert_model", "-b", default='roberta-base')  # Change default value
 # parser.add_argument("--", "-t", default=16, type=int, action = 'store_true')
 args = parser.parse_args()
 
@@ -75,35 +75,33 @@ else:
 
 print(df.select_dtypes(include=['number']).mean())
 LABEL_NUM = 9
-list_of_label = ['Place', 'Race', 'Occupation', 'Gender', 'Religion', 'Education', 'Socioeconomic', 'Social', 'Plus']  # 添加这一行
+list_of_label = ['Place', 'Race', 'Occupation', 'Gender', 'Religion', 'Education', 'Socioeconomic', 'Social', 'Plus']  
 tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
 
 
-# 计算每个类别的正例权重 (类别频率的倒数)
+# Calculate positive class weights (inverse of class frequency)
 class_frequencies = np.array([0.419483, 0.413022, 0.149105, 0.488569, 0.029324, 
                              0.254970, 0.394632, 0.077038, 0.307654])
                              
-# 可以选择限制权重范围，避免极端值
-# 更积极的权重计算
-weights = np.log1p(1.0 / class_frequencies) * 3  # 对数放大+线性系数
-weights = np.clip(weights, 1.0, 30.0)  # 提高上限至30
+# Optionally limit weight range to avoid extreme values
+# More aggressive weight calculation
+weights = np.log1p(1.0 / class_frequencies) * 3  # Log amplification + linear coefficient
+weights = np.clip(weights, 1.0, 30.0)  # Increase upper limit to 30
 
-# 为极低频类别设置特殊权重
+# Set special weights for very rare classes
 rare_threshold = 0.05
 for i, freq in enumerate(class_frequencies):
-    if freq < rare_threshold:  # Religion, Social等
-        weights[i] = 30.0  # 直接给予最大权重
+    if freq < rare_threshold:  # Religion, Social, etc.
+        weights[i] = 30.0  # Directly assign max weight
 
-# 为特定问题类别增加权重
+# Further increase weights for specific problematic categories
 problem_categories = [2, 4, 7]  # Occupation, Religion, Social
 for i in problem_categories:
-    weights[i] = weights[i] * 1.5  # 进一步提高权重
+    weights[i] = weights[i] * 1.5  # Further increase weight
 
 
-# 特别提高Social类别的权重上限
-weights[7] = 45.0  # Social类别的索引是7
 
-# 转换为PyTorch张量并移至正确设备
+# Convert to PyTorch tensor and move to correct device
 pos_weights = torch.tensor(weights, dtype=torch.float).to(device)
 
 class CustomDataset(Dataset):
@@ -126,14 +124,14 @@ class CustomDataset(Dataset):
             None,
             add_special_tokens=True,
             max_length=self.max_len,
-            padding='max_length',  # 替换过时的pad_to_max_length参数
-            truncation=True,  # 明确启用截断
-            return_token_type_ids='roberta' not in args.bert_model  # RoBERTa不需要token_type_ids
+            padding='max_length',  # Replace deprecated pad_to_max_length parameter
+            truncation=True,  # Explicitly enable truncation
+            return_token_type_ids='roberta' not in args.bert_model  # RoBERTa does not need token_type_ids
         )
         ids = inputs['input_ids']
         mask = inputs['attention_mask']
         if 'roberta' in args.bert_model:
-          token_type_ids = [0] * len(ids)  # RoBERTa不使用，但保持接口一致
+          token_type_ids = [0] * len(ids)  # RoBERTa does not use, but keep interface consistent
         else:
           token_type_ids = inputs["token_type_ids"]
 
@@ -182,18 +180,18 @@ class BERT_multilabel(torch.nn.Module):
         super(BERT_multilabel, self).__init__()
         self.l1 = AutoModel.from_pretrained(args.bert_model)
         self.l2 = torch.nn.Dropout(0.3)
-                # 动态设置隐藏层维度，适应不同模型大小
+        # Dynamically set hidden layer size to adapt to different model sizes
         hidden_size = 1024 if "large" in args.bert_model else 768
         self.l3 = torch.nn.Linear(hidden_size, LABEL_NUM)
 
     def forward(self, ids, mask, token_type_ids):
-        # RoBERTa不使用token_type_ids
+        # RoBERTa does not use token_type_ids
         if 'roberta' in args.bert_model:
             output_1 = self.l1(ids, attention_mask=mask)
         else:
             output_1 = self.l1(ids, attention_mask=mask, token_type_ids=token_type_ids)
         
-        # 获取[CLS]对应的向量
+        # Get the vector corresponding to [CLS]
         if hasattr(output_1, "pooler_output"):
             pooled_output = output_1.pooler_output
         elif type(output_1) is tuple:
@@ -207,63 +205,63 @@ class BERT_multilabel(torch.nn.Module):
 
 
 
-# 为极低频类别增加gamma值
+# Increase gamma value for very rare classes
 def loss_fn(outputs, targets):
-    # 为不同类别设置不同gamma值
+    # Set different gamma values for different classes
     gammas = [2.0] * LABEL_NUM
-    gammas[4] = 3.0  # Religion使用更高gamma
-    gammas[7] = 3.5  # Social使用略高gamma
+    gammas[4] = 3.0  # Higher gamma for Religion
+    gammas[7] = 3.5  # Slightly higher gamma for Social
     return focal_loss_with_weights_dynamic(outputs, targets, gammas)
 
 def focal_loss_with_weights_dynamic(outputs, targets, gammas):
-    """支持每个类别使用不同gamma值的Focal Loss"""
-    # 初始化各类别的损失
+    """Support different gamma values for each class in Focal Loss"""
+    # Initialize loss for each class
     losses = []
     
-    # 对每个类别单独计算Focal Loss
+    # Compute Focal Loss for each class separately
     for i in range(len(gammas)):
-        # 获取当前类的输出和目标
+        # Get current class output and target
         curr_output = outputs[:, i]
         curr_target = targets[:, i]
         
-        # 计算当前类的BCE损失
+        # Compute BCE loss for current class
         bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weights[i:i+1], reduction='none')(
             curr_output, curr_target)
         
-        # 计算预测概率
+        # Compute predicted probability
         prob = torch.sigmoid(curr_output)
         pt = prob * curr_target + (1 - prob) * (1 - curr_target)
         
-        # 使用当前类的gamma值
+        # Use current class's gamma value
         curr_gamma = gammas[i]
         focal_weight = (1 - pt) ** curr_gamma
         
-        # 计算加权损失并添加
+        # Compute weighted loss and add
         curr_loss = (focal_weight * bce).mean()
         losses.append(curr_loss)
     
-    # 返回所有类别损失的总和
+    # Return the average loss of all classes
     return sum(losses) / len(losses)
 
 
 
-# 1. 模型定义与初始化部分保持不变
+
 model = BERT_multilabel()
 model.to(device)
 optimizer = torch.optim.Adam(params=model.parameters(), lr=LEARNING_RATE)
 
-# 2. 早停机制参数设置
-patience = 15  # 允许连续多少个epoch没有改进
-best_f1 = 0   # 跟踪最佳F1分数
-counter = 0   # 计数器：连续没有改进的epoch数
+# 2. Early stop mechanism parameter setting
+patience = 15 # How many consecutive epochs are allowed without improvement
+best_f1 = 0 # Keep track of the best F1 score
+counter = 0 # counter: number of consecutive epochs without improvement
 
 
-# 创建包含详细参数信息的模型文件名
+
 def create_model_name():
-    # 基本模型类型
+    
     model_type = "roberta" if "roberta" in args.bert_model else "scibert"
     
-    # 模型具体变种
+   
     if "base" in args.bert_model:
         variant = "base"
     elif "large" in args.bert_model:
@@ -271,30 +269,30 @@ def create_model_name():
     else:
         variant = "custom"
     
-    # 核心参数字符串
+    
     params_str = f"bs{args.train_batch_size}_lr{args.learning_rate:.1e}_ep{args.epoch}"
     
-    # 生成最终文件名
+    
     return f"{results_directory}/{model_type}_{variant}_{params_str}.pt"
     
 
     
 
-# 在训练开始前定义模型保存路径
+# Create a unique model name based on parameters
 best_model_path = create_model_name()
-print(f"模型将保存为: {best_model_path}")
-early_stop = False  # 是否触发早停
+print(f"The model will be saved as: {best_model_path}")
+early_stop = False  
 
-# 梯度累积设置
-accumulation_steps = 2  # 累积4个批次
+# Gradient accumulation setting
+accumulation_steps = 2  # 4 batches
 effective_batch_size = args.train_batch_size * accumulation_steps
-print(f"使用梯度累积: {accumulation_steps}步, 有效批次大小: {effective_batch_size}")
+print(f"Using gradient accumulation: {accumulation_steps}step, Effective batch size: {effective_batch_size}")
 
-# 3. 先定义训练与验证函数
+
 def train_multilabel(epoch):
     print(epoch)
     model.train()
-    optimizer.zero_grad()  # 在整个循环外部清零梯度
+    optimizer.zero_grad()  
     accumulated_loss = 0
     
     for i, data in enumerate(training_loader, 0):
@@ -304,24 +302,24 @@ def train_multilabel(epoch):
         targets = data['targets'].to(device, dtype=torch.float)
         
         outputs = model(ids, mask, token_type_ids)
-        # 缩放损失值，使总梯度大小与常规训练相当
+     
         loss = loss_fn(outputs, targets) / accumulation_steps
-        accumulated_loss += loss.item() * accumulation_steps  # 累积原始损失
+        accumulated_loss += loss.item() * accumulation_steps  
         loss.backward()
         
-        # 每处理accumulation_steps个批次才更新一次权重
+        # Weights are updated only once every batch of calculation_steps is processed.
         if (i + 1) % accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
     
-    # 处理最后不足accumulation_steps的批次
+    # Processing of batches with final insufficient accumulation_steps
     if (i + 1) % accumulation_steps != 0:
         optimizer.step()
         optimizer.zero_grad()
         
     print(f"Average loss: {accumulated_loss / (i+1):.4f}")
 
-# 4. 定义验证函数 - 这个必须在训练循环前定义
+
 def validation_multilabel(model):
     model = model
     model.eval()
@@ -342,11 +340,11 @@ def validation_multilabel(model):
 
     return fin_outputs, fin_targets, text_list
 
-# 5. 然后才是训练循环
+
 for epoch in range(EPOCHS):
     train_multilabel(epoch)
     
-    # 每个epoch后验证
+
     outputs, targets, _ = validation_multilabel(model)
     current_f1 = metrics.f1_score(targets, 
                                  [[np.round(float(i)) for i in nested] for nested in outputs], 
@@ -354,24 +352,24 @@ for epoch in range(EPOCHS):
     
     print(f"Epoch {epoch}: F1 score = {current_f1:.4f}")
     
-    # 检查是否有改进
+    # Check for improvements
     if current_f1 > best_f1:
         print(f"F1 improved from {best_f1:.4f} to {current_f1:.4f}! Saving model...")
         best_f1 = current_f1
-        # 保存最佳模型
+        # Keep the best model
         torch.save(model.state_dict(), best_model_path)
-        counter = 0  # 重置计数器
+        counter = 0  
     else:
         counter += 1
         print(f"F1 did not improve. counter: {counter}/{patience}")
         
-        # 检查是否应该早停
+        # Check if you should stop early
         if counter >= patience:
             print(f"Early stopping at epoch {epoch}")
             early_stop = True
             break
 
-# 6. 训练结束后加载最佳模型
+# 6. Loading the best model at the end of training
 if os.path.exists(best_model_path):
     print(f"Loading best model from {best_model_path}")
     model.load_state_dict(torch.load(best_model_path))
