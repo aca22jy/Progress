@@ -80,30 +80,39 @@ tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
 
 
 # Calculate positive class weights (inverse of class frequency)
-class_frequencies = np.array([0.419483, 0.413022, 0.149105, 0.488569, 0.029324, 
-                             0.254970, 0.394632, 0.077038, 0.307654])
-                             
-# Optionally limit weight range to avoid extreme values
-# More aggressive weight calculation
-weights = np.log1p(1.0 / class_frequencies) * 3  # Log amplification + linear coefficient
-weights = np.clip(weights, 1.0, 30.0)  # Increase upper limit to 30
+# ---- START: MODIFICATION FOR FAIR COMPARISON ----
+# For a fair comparison on the downsampled dataset where all positive classes are equally rare,
+# we should not use the original complex weighting.
+# Option 1: No positive weights (equivalent to all weights being 1)
+pos_weights = torch.ones(LABEL_NUM, dtype=torch.float).to(device) 
 
-# Set special weights for very rare classes
-rare_threshold = 0.05
-for i, freq in enumerate(class_frequencies):
-    if freq < rare_threshold:  # Religion, Social, etc.
-        weights[i] = 30.0  # Directly assign max weight
+# Option 2: Or, if you still want some basic inverse frequency based on the *new* downsampled data
+# (assuming all positive classes now have roughly 0.029324 frequency)
+# uniform_frequency = 0.029324 # Or calculate this dynamically from the new_df
+# basic_weight = 1.0 / uniform_frequency
+# weights = np.full(LABEL_NUM, basic_weight)
+# weights = np.clip(weights, 1.0, 10.0) # Optional clipping to a more moderate range
+# pos_weights = torch.tensor(weights, dtype=torch.float).to(device)
 
-# Further increase weights for specific problematic categories
-problem_categories = [2, 4, 7]  # Occupation, Religion, Social
-for i in problem_categories:
-    weights[i] = weights[i] * 1.5  # Further increase weight
+# Comment out or remove the original complex weight calculation:
+# class_frequencies = np.array([0.419483, 0.413022, 0.149105, 0.488569, 0.029324, 
+#                              0.254970, 0.394632, 0.077038, 0.307654])
+# weights = np.log1p(1.0 / class_frequencies) * 3
+# weights = np.clip(weights, 1.0, 30.0)
+# rare_threshold = 0.05
+# for i, freq in enumerate(class_frequencies):
+#     if freq < rare_threshold:
+#         weights[i] = 30.0
+# problem_categories = [2, 4, 7]
+# for i in problem_categories:
+#     weights[i] = weights[i] * 1.5
+# pos_weights = torch.tensor(weights, dtype=torch.float).to(device)
+# ---- END: MODIFICATION FOR FAIR COMPARISON ----
 
 
 
 # Convert to PyTorch tensor and move to correct device
-pos_weights = torch.tensor(weights, dtype=torch.float).to(device)
-
+# pos_weights = torch.tensor(weights, dtype=torch.float).to(device) # This line is now handled above
 class CustomDataset(Dataset):
     def __init__(self, dataframe, tokenizer, max_len):
         self.tokenizer = tokenizer
