@@ -23,7 +23,7 @@ parser.add_argument("--max_len", "-m", default=512, type=int)
 parser.add_argument("--learning_rate", "-l", type=float, default=1e-05)
 parser.add_argument("--train_batch_size", "-t", default=28, type=int)
 parser.add_argument('--journal_name', '-j', action = 'store_true')
-parser.add_argument("--bert_model", "-b", default='roberta-base')  # Change default value
+parser.add_argument("--bert_model", "-b", default='roberta-large')  # Change default value
 # parser.add_argument("--", "-t", default=16, type=int, action = 'store_true')
 args = parser.parse_args()
 
